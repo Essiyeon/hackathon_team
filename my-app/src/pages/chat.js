@@ -61,7 +61,7 @@ export default function ChatPage() {
     formData.append("audioFile", blob, "recording.webm");
  
     try {
-      const res = await fetch("http://localhost:3000/api/stt", {
+      const res = await fetch("https://goodbye-phobia.vercel.app/api/stt", {
         method: "POST",
         body: formData,
       });
