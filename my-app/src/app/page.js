@@ -19,9 +19,9 @@ export default function Home() {
     <div className="flex flex-col justify-center items-center min-h-screen text-center px-4">
       {/* Title with fade-in animation */}
       <div className={`transition-opacity duration-1000 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}>
-        <Title>포비야</Title>
-        <p className="text-lg text-green-600 mb-6 font-extrabold text-2xl drop-shadow-md">
-          함께 두려움을 극복해요!
+        <Title>정신건강 케어</Title>
+        <p className="text-lg text-blue-600 mb-6 font-extrabold text-2xl drop-shadow-md">
+          당신의 마음을 들어드릴게요
         </p>
       </div>
 
@@ -42,7 +42,7 @@ export default function Home() {
         <div className="relative overflow-hidden rounded-full">
           <Image 
             src="/images/pobby.png" 
-            alt="포비야 로고"
+            alt="정신건강 케어 로고"
             width={280}            
             height={280}
             className="rounded-full"
@@ -58,15 +58,15 @@ export default function Home() {
 
       {/* Start button with enhanced feedback */}
       <button
-        className={`bg-green-500/90 hover:bg-green-600 text-white px-10 py-4 rounded-full text-xl
+        className={`bg-blue-500/90 hover:bg-blue-600 text-white px-10 py-4 rounded-full text-xl
                   font-medium shadow-lg hover:shadow-xl active:shadow-md active:translate-y-0.5
                   transition-all duration-300 backdrop-blur-sm
                   ${isLoaded ? 'translate-y-0 opacity-100' : 'translate-y-12 opacity-0'}`}
         style={{ transitionDelay: "0.4s" }}
-        onClick={() => router.push("/categorySelect")}
-        aria-label="시작하기"
+        onClick={() => router.push("/chat")}
+        aria-label="상담 시작하기"
       >
-        시작하기
+        상담 시작하기
       </button>
     </div>
   );

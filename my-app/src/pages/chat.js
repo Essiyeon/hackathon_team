@@ -1,430 +1,378 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import "../styles/globals.css"; 
-import Footer from "@/component/footer";
-import Title from "@/component/Title"; 
+import { useRouter } from "next/navigation";
+import Image from "next/image";
+import { FaMicrophone, FaMicrophoneSlash, FaPlay, FaPause, FaHome } from "react-icons/fa";
 
-export default function ChatPage() {
-  const searchParams = useSearchParams();
+export default function Chat() {
   const router = useRouter();
-  const category = searchParams.get("category");
-  const difficulty = searchParams.get("difficulty");
-
-  const categoryMapping = {
-    hospital: "병원",
-    restaurant: "중국집",
-    bank: "은행"
-  };
-
-  const difficultyLabels = {
-    low: "친절한",
-    middle: "평범한",
-    high: "까칠한",
-  };
-
-  const displayCategory = categoryMapping[category] || category;
-  const displayDifficulty =difficultyLabels[difficulty]|| difficulty;
-
-  const MAX_RECORDS = 3; // 최대 녹음 횟수 설정
-  const [messages, setMessages] = useState([
-    { role: "system", content: `안녕하세요! ${displayCategory} 시물레이션 입니다.` },
-  ]);
-  const [recordCount, setRecordCount] = useState(0);
+  const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
-  const [audioSrc, setAudioSrc] = useState(null);
-  const [isConversationEnded, setIsConversationEnded] = useState(false);
-  const [remainingTime, setRemainingTime] = useState(0); // 녹음 남은 시간 표시
-  const [showTooltip, setShowTooltip] = useState(false); // 버튼 도움말 표시
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentAudio, setCurrentAudio] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [currentCategory, setCurrentCategory] = useState(null);
+  const [currentSeverity, setCurrentSeverity] = useState(null);
+  
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const audioRef = useRef(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [showRecordingIndicator, setShowRecordingIndicator] = useState(false); // 녹음 중 표시기
-  
-  // 녹음 시작 (4초 후 자동 중지)
-  const startRecording = async () => {
-    if (isRecording || isPlaying || recordCount >= MAX_RECORDS) return;
+  const audioContextRef = useRef(null);
 
-    console.log(`🎤 녹음 시작! 현재 녹음 횟수: ${recordCount}/${MAX_RECORDS}`);
-    audioChunksRef.current = [];
-    setAudioSrc(null);
-    setRemainingTime(4); // 4초로 설정
-    setShowRecordingIndicator(true);
+  // 카테고리 분류를 위한 키워드 매핑
+  const categoryKeywords = {
+    "정신건강": ["우울", "불안", "스트레스", "자살", "죽고싶다", "힘들다", "괴롭다", "무기력", "절망", "고민"],
+    "가족관계": ["부모", "가족", "엄마", "아빠", "형제", "자매", "가정", "부모님", "가족관계"],
+    "학교생활": ["학교", "공부", "시험", "친구", "선생님", "학업", "성적", "등교", "수업", "동급생"],
+    "대인관계": ["친구", "사람", "관계", "소통", "외톨이", "왕따", "따돌림", "인간관계", "사교"],
+    "진로": ["진로", "직업", "꿈", "미래", "직장", "취업", "전공", "학과", "직업선택"],
+    "연애": ["연애", "사랑", "남자친구", "여자친구", "이별", "연인", "데이트", "고백"],
+    "성": ["성", "성교육", "성적", "임신", "피임", "성관계", "성적지향"],
+    "인터넷/스마트폰": ["인터넷", "스마트폰", "게임", "SNS", "유튜브", "온라인", "디지털", "중독"],
+    "폭력": ["폭력", "폭행", "학폭", "가정폭력", "성폭력", "따돌림", "왕따", "폭언"],
+    "성격": ["성격", "자신감", "자존감", "소심", "내향적", "외향적", "완벽주의"],
+    "학습": ["학습", "공부", "시험", "성적", "학업", "수업", "과제", "숙제"],
+    "기타": ["기타", "다른", "그 외", "기타문제"]
+  };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+  // 키워드 기반 카테고리 분류 함수
+  const classifyCategory = (text) => {
+    const lowerText = text.toLowerCase();
+    
+    for (const [category, keywords] of Object.entries(categoryKeywords)) {
+      for (const keyword of keywords) {
+        if (lowerText.includes(keyword.toLowerCase())) {
+          return category;
         }
-      };
+      }
+    }
+    
+    return "기타"; // 기본값
+  };
 
-      mediaRecorder.onstop = async () => {
-        console.log("⏹️ 자동 녹음 중지됨! 데이터 크기:", audioChunksRef.current.length);
-        setRecordCount(prev => prev + 1);
-        setShowRecordingIndicator(false);
-        await handleTranscribeAndAskGPT(audioChunksRef.current);
-      };
+  // 심각도 평가 함수 (키워드 기반)
+  const evaluateSeverity = (text) => {
+    const lowerText = text.toLowerCase();
+    
+    // 위험 키워드 (심각도 5)
+    const dangerKeywords = ["자살", "죽고싶다", "죽을까봐", "죽이고싶다", "끝내고싶다"];
+    for (const keyword of dangerKeywords) {
+      if (lowerText.includes(keyword)) {
+        return 5;
+      }
+    }
+    
+    // 고위험 키워드 (심각도 4)
+    const highRiskKeywords = ["힘들다", "괴롭다", "절망", "무기력", "의미없다"];
+    for (const keyword of highRiskKeywords) {
+      if (lowerText.includes(keyword)) {
+        return 4;
+      }
+    }
+    
+    // 중간 위험 키워드 (심각도 3)
+    const mediumRiskKeywords = ["스트레스", "불안", "걱정", "고민", "어려움"];
+    for (const keyword of mediumRiskKeywords) {
+      if (lowerText.includes(keyword)) {
+        return 3;
+      }
+    }
+    
+    // 낮은 위험 키워드 (심각도 2)
+    const lowRiskKeywords = ["조금", "가끔", "생각", "고민"];
+    for (const keyword of lowRiskKeywords) {
+      if (lowerText.includes(keyword)) {
+        return 2;
+      }
+    }
+    
+    return 1; // 기본 심각도
+  };
 
-      mediaRecorder.start();
-      setIsRecording(true);
-
-      // 4초 카운트다운 타이머
-      const countdownTimer = setInterval(() => {
-        setRemainingTime(prev => {
-          if (prev <= 1) {
-            clearInterval(countdownTimer);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      // 4초 후 자동으로 중지
-      setTimeout(() => {
-        stopRecording();
-        clearInterval(countdownTimer);
-      }, 4000);
-      
-    } catch (error) {
-      alert("마이크 권한을 허용해주세요.");
-      setShowRecordingIndicator(false);
+  // 상담 기법 선택 함수
+  const selectCounselingTechnique = (category, severity) => {
+    if (severity >= 4) {
+      return "위기 개입 기법";
+    } else if (category === "정신건강" && severity >= 3) {
+      return "인지행동치료 기법";
+    } else if (category === "가족관계" || category === "대인관계") {
+      return "가족치료 및 의사소통 기법";
+    } else {
+      return "공감적 경청 및 지지적 상담 기법";
     }
   };
 
-  // 녹음 중지
-  const stopRecording = () => {
-    if (!mediaRecorderRef.current) return;
-    console.log("⏹️ 녹음 중지 요청됨");
-    mediaRecorderRef.current.stop();
-    setIsRecording(false);
-    setShowRecordingIndicator(false);
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        await processAudio(audioBlob);
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert('마이크 접근 권한이 필요합니다.');
+    }
   };
 
-  // STT + GPT + TTS API 호출
-  const handleTranscribeAndAskGPT = async (chunks) => {
-    if (chunks.length === 0) return;
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+    }
+  };
 
-    const blob = new Blob(chunks, { type: "audio/webm" });
-    const formData = new FormData();
-    formData.append("audioFile", blob, "recording.webm");
-    formData.append("messages", JSON.stringify(messages));
-    formData.append("category", category); 
-    formData.append("difficulty", difficulty); 
-
+  const processAudio = async (audioBlob) => {
+    setIsProcessing(true);
+    
     try {
-      
-      const res = await fetch("/api/stt", {
-        method: "POST",
+      const formData = new FormData();
+      formData.append('audio', audioBlob);
+
+      const response = await fetch('/api/stt', {
+        method: 'POST',
         body: formData,
       });
 
-      const data = await res.json();
-      const { userText, gptReply, audio, messages: updatedMessages } = data;
-      console.log("🎤 유저 입력:", userText);
-      console.log("🤖 GPT 응답:", gptReply);
-      console.log("🔄 업데이트된 메시지 리스트:", updatedMessages);
-      
-      // "대화를 분석 중입니다..." 메시지 제거하고 업데이트된 메시지로 교체
-      setMessages(updatedMessages);
-
-      if (audio) {
-        const audioData = `data:audio/mp3;base64,${audio}`;
-        setAudioSrc(audioData);
-
-        // AI 음성 재생 시작
-        setIsPlaying(true);
-
-        setTimeout(() => {
-          if (audioRef.current) {
-            audioRef.current.play();
-            console.log("🔊 AI 음성 재생 시작");
-          }
-        }, 500);
+      if (!response.ok) {
+        throw new Error('STT 처리 실패');
       }
 
-      // 횟수 초과 후 종료 버튼 표시
-      if (recordCount + 1 >= MAX_RECORDS) {
-        setIsConversationEnded(true);
-      }
+      const { text } = await response.json();
       
-    } catch (err) {
-      // 오류 발생 시 에러 메시지 표시
-      setMessages(prev => [...prev.slice(0, -1), { role: "system", content: "오류가 발생했습니다. 다시 시도해 주세요." }]);
-      console.error("API 오류:", err);
-      alert("오류 발생: " + err.message);
+      // 사용자 메시지 추가
+      const userMessage = {
+        id: Date.now(),
+        text: text,
+        sender: 'user',
+        timestamp: new Date().toLocaleTimeString()
+      };
+      
+      setMessages(prev => [...prev, userMessage]);
+
+      // 카테고리 분류
+      const category = classifyCategory(text);
+      const severity = evaluateSeverity(text);
+      const technique = selectCounselingTechnique(category, severity);
+      
+      setCurrentCategory(category);
+      setCurrentSeverity(severity);
+
+      // AI 응답 생성
+      await generateAIResponse(text, category, severity, technique);
+      
+    } catch (error) {
+      console.error('Error processing audio:', error);
+      alert('음성 처리 중 오류가 발생했습니다.');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  // AI 음성이 끝난 후, 1초 후 다시 녹음 시작
+  const generateAIResponse = async (userText, category, severity, technique) => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userText,
+          category: category,
+          severity: severity,
+          technique: technique,
+          conversationHistory: messages.slice(-5) // 최근 5개 메시지만 전송
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('AI 응답 생성 실패');
+      }
+
+      const { aiResponse, audioUrl } = await response.json();
+
+      // AI 메시지 추가
+      const aiMessage = {
+        id: Date.now() + 1,
+        text: aiResponse,
+        sender: 'ai',
+        timestamp: new Date().toLocaleTimeString(),
+        category: category,
+        severity: severity,
+        technique: technique
+      };
+
+      setMessages(prev => [...prev, aiMessage]);
+
+      // TTS 재생
+      if (audioUrl) {
+        playTTS(audioUrl);
+      }
+
+    } catch (error) {
+      console.error('Error generating AI response:', error);
+      alert('AI 응답 생성 중 오류가 발생했습니다.');
+    }
+  };
+
+  const playTTS = (audioUrl) => {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+    }
+
+    const audio = new Audio(audioUrl);
+    audio.onended = () => {
+      setIsPlaying(false);
+      setCurrentAudio(null);
+    };
+    
+    audio.play();
+    setIsPlaying(true);
+    setCurrentAudio(audio);
+  };
+
+  const stopTTS = () => {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.currentTime = 0;
+      setIsPlaying(false);
+      setCurrentAudio(null);
+    }
+  };
+
   useEffect(() => {
-    if (!isPlaying && audioSrc) {
-      if (recordCount < MAX_RECORDS) {
-        console.log("🔁 AI 음성이 끝났으므로 1초 후 다시 녹음 시작!");
-        setTimeout(() => {
-          startRecording();
-        }, 1000);
+    return () => {
+      if (currentAudio) {
+        currentAudio.pause();
       }
-    }
-  }, [isPlaying]);
-
-  // "종료" 버튼 클릭 시 경험치 페이지로 이동
-  const handleEndConversation = () => {
-    router.push(`/experience?difficulty=${difficulty}`);
-  };
+    };
+  }, [currentAudio]);
 
   return (
-    <div 
-      style={{
-        position: "fixed",
-        top: "0",
-        left: "0",
-        width: "100vw",
-        height: "100vh",
-        backgroundImage: "url('/images/background2.jpg')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
-      {/* 타이틀 */}
-      <Title 
-        style={{
-          position: "absolute",
-          top: "5vh",
-          fontSize: "2rem",
-          fontWeight: "bold",
-          color: "white",
-          textAlign: "center",
-          textShadow: "2px 2px 4px rgba(0,0,0,0.5)"
-        }}
-      >
-        포비야
-      </Title>
-
-      {/* 카테고리 및 난이도 표시 */}
-      <div
-        style={{
-          position: "absolute",
-          top: "10vh",
-          backgroundColor: "rgba(255,255,255,0.8)",
-          padding: "8px 16px",
-          borderRadius: "20px",
-          fontSize: "1rem",
-          fontWeight: "bold",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
-        }}
-      >
-        {displayCategory} - {displayDifficulty}
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col">
+      {/* Header */}
+      <div className="bg-white shadow-md p-4 flex items-center justify-between">
+        <button
+          onClick={() => router.push("/")}
+          className="flex items-center gap-2 text-blue-600 hover:text-blue-800 transition-colors"
+        >
+          <FaHome size={20} />
+          <span className="font-medium">홈으로</span>
+        </button>
+        
+        <div className="text-center">
+          <h1 className="text-xl font-bold text-gray-800">정신건강 케어 상담</h1>
+          {currentCategory && (
+            <p className="text-sm text-gray-600">
+              분류: {currentCategory} | 심각도: {currentSeverity}/5
+            </p>
+          )}
+        </div>
+        
+        <div className="w-20"></div> {/* Spacer for centering */}
       </div>
 
-      {/* 채팅 박스 */}
-      <div 
-        style={{
-          position: "fixed",
-          top: "17vh",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "80vw", 
-          maxWidth: "500px",
-          height: "55vh",
-          backgroundColor: "rgba(255, 255, 255, 0.9)",
-          borderRadius: "12px",
-          boxShadow: "0px 8px 16px rgba(0, 0, 0, 0.3)",
-          padding: "16px",
-          overflowY: "auto",
-          border: "1px solid #ccc",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "flex-start",
-        }}
-      >
-
-        {/* 메시지 카운터 */}
-      <div
-        style={{
-          position: "absolute",
-          top: "6%",
-          left: "85%",
-          backgroundColor: "rgba(0,0,0,0.6)",
-          color: "white",
-          padding: "4px 12px",
-          borderRadius: "20px",
-          fontSize: "0.9rem",
-          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-          zIndex: 100,
-        }}
-      >
-        {recordCount}/{MAX_RECORDS}
-      </div>
-        {Array.isArray(messages) ? (
-          messages.map((msg, index) => {
-            const isSystemMessage = msg.role === "system" && index === 0;
-            const isGPTResponse = msg.role === "system" && index !== 0;
-            const isUserMessage = msg.role === "user";
-
-            return (
-              <div 
-                key={index} ß
-                style={{ 
-                  display: "flex", 
-                  justifyContent: isUserMessage ? "flex-end" : "flex-start",
-                  marginBottom: "10px",
-                  animationName: index === messages.length - 1 ? "fadeIn" : "none",
-                  animationDuration: "0.5s"
-                }}
-              >
-                <div
-                  style={{
-                    padding: "12px",
-                    maxWidth: "75%",
-                    borderRadius: "16px",
-                    fontSize: "14px",
-                    backgroundColor: isSystemMessage ? "#FFD700" : isUserMessage ? "#3B82F6" : "#FFD700",
-                    color: isUserMessage ? "white" : "black",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                    borderTopLeftRadius: isUserMessage ? "16px" : isSystemMessage ? "16px" : "4px",
-                    borderTopRightRadius: isUserMessage ? "4px" : "16px",
-                  }}
-                >
-                  {msg.content}
+      {/* Chat Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center text-gray-500 mt-20">
+            <div className="mb-4">
+              <Image
+                src="/images/pobby.png"
+                alt="상담 로봇"
+                width={100}
+                height={100}
+                className="mx-auto rounded-full"
+              />
+            </div>
+            <p className="text-lg">안녕하세요! 무엇이든 편하게 말씀해 주세요.</p>
+            <p className="text-sm mt-2">마이크 버튼을 눌러 음성으로 대화하세요.</p>
+          </div>
+        )}
+        
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                message.sender === 'user'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-800 shadow-md'
+              }`}
+            >
+              <p className="text-sm">{message.text}</p>
+              <p className="text-xs opacity-70 mt-1">{message.timestamp}</p>
+              
+              {message.sender === 'ai' && message.category && (
+                <div className="mt-2 text-xs opacity-60">
+                  <p>분류: {message.category}</p>
+                  <p>심각도: {message.severity}/5</p>
+                  <p>기법: {message.technique}</p>
                 </div>
+              )}
+            </div>
+          </div>
+        ))}
+        
+        {isProcessing && (
+          <div className="flex justify-start">
+            <div className="bg-white text-gray-800 shadow-md px-4 py-2 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                <span className="text-sm">상담사가 응답을 준비하고 있습니다...</span>
               </div>
-            );
-          })
-        ) : (
-          <p style={{ textAlign: "center", color: "red" }}>
-            ⚠️ 오류: messages가 배열이 아닙니다. 현재 값: {JSON.stringify(messages)}
-          </p>
+            </div>
+          </div>
         )}
       </div>
-      {/* 녹음 중 표시기 */}
-      {showRecordingIndicator && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "30vh",
-            left: "50%",
-            transform: "translateX(-50%)",
-            backgroundColor: "rgba(220, 20, 60, 0.8)",
-            color: "white",
-            padding: "8px 16px",
-            borderRadius: "20px",
-            fontSize: "1rem",
-            fontWeight: "bold",
-            display: "flex",
-            alignItems: "center",
-            boxShadow: "0 4px 8px rgba(0,0,0,0.3)",
-            animation: "pulse 1s infinite"
-          }}
-        >
-          <span style={{ display: "inline-block", width: "12px", height: "12px", backgroundColor: "white", borderRadius: "50%", marginRight: "8px" }}></span>
-          녹음 중... {remainingTime}초
-        </div>
-      )}
 
-      {/* 녹음/종료 버튼 */}
-      <div 
-        style={{
-          position: "absolute",
-          bottom: "16vh",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "80px",
-          height: "80px",
-          borderRadius: "50%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          transition: "transform 0.2s ease",
-        }}
-        onClick={!isConversationEnded ? startRecording : handleEndConversation}
-        onMouseEnter={() => {
-          setShowTooltip(true);
-          document.body.style.cursor = "pointer";
-        }}
-        onMouseLeave={() => {
-          setShowTooltip(false);
-          document.body.style.cursor = "default";
-        }}
-        onMouseDown={(e) => e.currentTarget.style.transform = "translateX(-50%) scale(0.95)"}
-        onMouseUp={(e) => e.currentTarget.style.transform = "translateX(-50%) scale(1)"}
-      >
-        <img 
-          src={isRecording ? "/images/button2.png" : isConversationEnded ? "/images/button2.png" : "/images/button1.png"}
-          alt={isConversationEnded ? "종료 버튼" : "녹음 버튼"}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-            filter: isRecording ? "brightness(0.8)" : "brightness(1)"
-          }}
-        />
+      {/* Control Panel */}
+      <div className="bg-white shadow-lg p-6">
+        <div className="flex items-center justify-center gap-4">
+          {/* Recording Button */}
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isProcessing}
+            className={`p-4 rounded-full transition-all duration-300 ${
+              isRecording
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : 'bg-blue-500 hover:bg-blue-600 text-white'
+            } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {isRecording ? <FaMicrophoneSlash size={24} /> : <FaMicrophone size={24} />}
+          </button>
+
+          {/* TTS Control */}
+          {currentAudio && (
+            <button
+              onClick={isPlaying ? stopTTS : () => playTTS(currentAudio.src)}
+              className="p-4 rounded-full bg-green-500 hover:bg-green-600 text-white transition-all duration-300"
+            >
+              {isPlaying ? <FaPause size={24} /> : <FaPlay size={24} />}
+            </button>
+          )}
+        </div>
+        
+        <div className="text-center mt-4">
+          <p className="text-sm text-gray-600">
+            {isRecording ? '녹음 중... (다시 클릭하여 중지)' : '마이크를 눌러 음성으로 대화하세요'}
+          </p>
+        </div>
       </div>
-
-      {/* 버튼 도움말 */}
-      {showTooltip && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "25vh",
-            left: "50%",
-            transform: "translateX(-50%)",
-            backgroundColor: "rgba(0,0,0,0.8)",
-            color: "white",
-            padding: "8px 16px",
-            borderRadius: "8px",
-            fontSize: "0.9rem",
-            whiteSpace: "nowrap",
-            zIndex: 100,
-          }}
-        >
-          {isConversationEnded ? "대화 종료하기" : "여기를 눌러 말하세요"}
-        </div>
-      )}
-
-      {/* 음성 자동 재생 (숨김) */}
-      {audioSrc && (
-        <audio 
-          ref={audioRef} 
-          autoPlay 
-          controls 
-          style={{ position: "absolute", bottom: "10vh", display: "none" }}
-          onEnded={() => {
-            setIsPlaying(false);
-            if (isConversationEnded) {
-              router.push(`/experience?difficulty=${difficulty}`);
-            }
-          }}
-        >
-          <source src={audioSrc} type="audio/mp3" />
-          브라우저가 오디오 태그를 지원하지 않습니다.
-        </audio>
-      )}
-
-      {/* 스타일 - 애니메이션 */}
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.6; }
-          100% { opacity: 1; }
-        }
-      `}</style>
-
-      {/* 푸터 */}
-      <Footer showModal={true} />
     </div>
   );
 }
